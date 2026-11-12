@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+OpenIDE-Module-Layer: META-INF/generated-layer.xml
+OpenIDE-Module-Localizing-Bundle: co/edu/cecar/objectrepositorymanager/Bundle.properties
+
