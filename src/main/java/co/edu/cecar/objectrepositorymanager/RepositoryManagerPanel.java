@@ -12,6 +12,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.prefs.Preferences;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -30,6 +31,7 @@ import org.openide.filesystems.FileUtil;
 
 /** Project classes and records. Application code runs only in the helper JVM. */
 final class RepositoryManagerPanel extends JPanel {
+    private static final Preferences REFERENCE_FILES = Preferences.userNodeForPackage(RepositoryManagerPanel.class).node("referenceFiles");
     private final RepositoryClient client;
     private final File projectDirectory;
     private final DefaultMutableTreeNode navigationRoot = new DefaultMutableTreeNode("Clases y objetos");
@@ -412,10 +414,22 @@ final class RepositoryManagerPanel extends JPanel {
     }
 
     private void chooseReference(FormInput input, String type) {
-        JFileChooser chooser = new JFileChooser(new File(projectDirectory, "data"));
-        chooser.setDialogTitle("Seleccionar archivo de " + type);
-        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
-        String path = chooser.getSelectedFile().getAbsolutePath();
+        String preferenceKey = projectDirectory.getAbsolutePath() + "|" + type;
+        String remembered = REFERENCE_FILES.get(preferenceKey, "");
+        File previous = new File(remembered);
+        String path;
+        if (previous.isFile()) {
+            int choice = JOptionPane.showConfirmDialog(this,
+                    "Usar el archivo seleccionado anteriormente?\n" + previous.getPath()
+                            + "\n\nSelecciona No para elegir otro archivo.",
+                    "Archivo de " + type.substring(type.lastIndexOf('.') + 1),
+                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (choice == JOptionPane.CANCEL_OPTION || choice == JOptionPane.CLOSED_OPTION) return;
+            if (choice == JOptionPane.YES_OPTION) path = previous.getAbsolutePath();
+            else path = chooseReferenceFile(type);
+        } else path = chooseReferenceFile(type);
+        if (path == null) return;
+        REFERENCE_FILES.put(preferenceKey, path);
         Properties query = new Properties();
         query.setProperty("op", "open"); query.setProperty("type", type); query.setProperty("file", path);
         run(query, "Leyendo objetos relacionados…", result -> {
@@ -439,6 +453,14 @@ final class RepositoryManagerPanel extends JPanel {
             ((JTextField) input.editor).setText(selection.toString());
             input.nullValue.setSelected(false); input.editor.setEnabled(true);
         });
+    }
+
+    private String chooseReferenceFile(String type) {
+        JFileChooser chooser = new JFileChooser(new File(projectDirectory, "data"));
+        chooser.setDialogTitle("Seleccionar archivo de " + type);
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        return chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION
+                ? chooser.getSelectedFile().getAbsolutePath() : null;
     }
 
     private FormInput addInput(JPanel form, int index, String name, String type, boolean editable,
