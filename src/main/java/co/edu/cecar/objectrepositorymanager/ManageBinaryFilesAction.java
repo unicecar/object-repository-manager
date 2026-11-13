@@ -41,8 +41,8 @@ public final class ManageBinaryFilesAction extends AbstractAction implements Con
     private ManageBinaryFilesAction(Project project) {
         super(Bundle.CTL_ManageBinaryFiles());
         this.project = project;
-        putValue(DynamicMenuContent.HIDE_WHEN_DISABLED, true);
-        setEnabled(project != null && javaSources(project).length > 0);
+        putValue(DynamicMenuContent.HIDE_WHEN_DISABLED, false);
+        setEnabled(true);
     }
 
     static SourceGroup[] javaSources(Project project) {
@@ -58,7 +58,8 @@ public final class ManageBinaryFilesAction extends AbstractAction implements Con
 
     @Override
     public void actionPerformed(ActionEvent event) {
-        if (project == null || javaSources(project).length == 0) {
+        if (project == null) {
+            new OpenRepositoryManagerAction().actionPerformed(event);
             return;
         }
         open(project);

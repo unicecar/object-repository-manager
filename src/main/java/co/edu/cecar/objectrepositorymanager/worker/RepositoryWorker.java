@@ -203,7 +203,7 @@ public final class RepositoryWorker {
         List<Constructor<?>> result = new ArrayList<>();
         for (Constructor<?> constructor : type.getDeclaredConstructors()) {
             if (constructor.isSynthetic() || !Modifier.isPublic(constructor.getModifiers())) continue;
-            if (!Arrays.stream(constructor.getParameterTypes()).allMatch(RepositoryWorker::supported)) continue;
+            if (!Arrays.stream(constructor.getParameterTypes()).allMatch(t -> supported(t) || Serializable.class.isAssignableFrom(t))) continue;
             if (constructor.getParameterCount() == 0 && fields.stream().anyMatch(f -> !editable(f))) continue;
             if (constructor.trySetAccessible()) result.add(constructor);
         }
@@ -227,7 +227,19 @@ public final class RepositoryWorker {
             Class<?> parameterType = constructor.getParameterTypes()[i];
             boolean isNull = Boolean.parseBoolean(request.getProperty("argNull." + i, "false"));
             if (isNull && parameterType.isPrimitive()) throw new IllegalArgumentException("El argumento " + (i + 1) + " no admite null.");
-            try { arguments[i] = isNull ? null : parse(parameterType, request.getProperty("arg." + i, "")); }
+            try {
+                if (isNull) arguments[i] = null;
+                else if (supported(parameterType)) arguments[i] = parse(parameterType, request.getProperty("arg." + i, ""));
+                else {
+                    byte[] bytes = readBytes(Path.of(required(request, "argFile." + i)));
+                    if (!digest(bytes).equals(required(request, "argRevision." + i)))
+                        throw new IllegalArgumentException("El archivo relacionado cambió. Selecciona nuevamente el objeto.");
+                    List<Object> related = readRows(bytes, parameterType);
+                    int index = Integer.parseInt(required(request, "argRow." + i));
+                    if (index < 0 || index >= related.size()) throw new IllegalArgumentException("Objeto relacionado inexistente.");
+                    arguments[i] = related.get(index);
+                }
+            }
             catch (RuntimeException ex) { throw new IllegalArgumentException("Argumento " + (i + 1) + " inválido: " + ex.getMessage(), ex); }
         }
         Object created = constructor.newInstance(arguments);
@@ -266,6 +278,7 @@ public final class RepositoryWorker {
                 String parameterPrefix = prefix + "param." + p + ".";
                 result.setProperty(parameterPrefix + "name", parameterNames.get(p));
                 result.setProperty(parameterPrefix + "type", parameter.getType().getTypeName());
+                result.setProperty(parameterPrefix + "reference", Boolean.toString(!supported(parameter.getType())));
                 result.setProperty(parameterPrefix + "nullable", Boolean.toString(!parameter.getType().isPrimitive()));
                 if (parameter.getType().isEnum()) result.setProperty(parameterPrefix + "enum", String.join(",",
                         Arrays.stream(parameter.getType().getEnumConstants()).map(v -> ((Enum<?>) v).name()).toArray(String[]::new)));

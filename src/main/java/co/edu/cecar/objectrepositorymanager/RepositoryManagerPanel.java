@@ -77,19 +77,24 @@ final class RepositoryManagerPanel extends JPanel {
         setPreferredSize(new Dimension(720, 420));
         setMinimumSize(new Dimension(540, 300));
         JPanel heading = new JPanel(new BorderLayout(6, 6));
-        heading.add(new JLabel("Proyecto: " + ProjectUtils.getInformation(project).getDisplayName()), BorderLayout.NORTH);
-        heading.add(new JLabel("Compila el proyecto y pulsa Actualizar clases para detectar sus entidades Serializable."), BorderLayout.SOUTH);
+        JLabel title = new JLabel(ProjectUtils.getInformation(project).getDisplayName());
+        title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 18f));
+        heading.add(title, BorderLayout.NORTH);
+        heading.add(new JLabel("Explora tus clases y administra sus registros."), BorderLayout.SOUTH);
         add(heading, BorderLayout.NORTH);
 
         JPanel navigation = new JPanel(new BorderLayout(6, 6));
         navigationTree.setRootVisible(false);
         navigationTree.setShowsRootHandles(true);
         navigationTree.getAccessibleContext().setAccessibleName("Clases y archivos de objetos");
-        navigation.add(new JLabel("Clases / entidades y objetos"), BorderLayout.NORTH);
+        navigationTree.setRowHeight(28);
+        navigation.setMinimumSize(new Dimension(150, 100));
+        navigation.add(new JLabel("Clases y archivos"), BorderLayout.NORTH);
         navigation.add(new JScrollPane(navigationTree), BorderLayout.CENTER);
         navigation.add(discover, BorderLayout.SOUTH);
         JPanel records = new JPanel(new BorderLayout(6, 6));
-        JPanel controls = new JPanel(new BorderLayout(4, 4));
+        JPanel controls = new JPanel(new BorderLayout(4, 8));
+        classHeading.setFont(classHeading.getFont().deriveFont(java.awt.Font.BOLD, 14f));
         controls.add(classHeading, BorderLayout.NORTH);
         fileLocation.setEditable(false);
         fileLocation.getAccessibleContext().setAccessibleName("Archivo de objetos seleccionado");
@@ -102,14 +107,18 @@ final class RepositoryManagerPanel extends JPanel {
         table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
         table.setRowSorter(sorter);
         table.setFillsViewportHeight(true);
-        table.setRowHeight(Math.max(24, table.getRowHeight()));
+        table.setRowHeight(Math.max(30, table.getRowHeight()));
+        table.setShowVerticalLines(false);
+        table.getTableHeader().setFont(table.getFont().deriveFont(java.awt.Font.BOLD));
         table.getAccessibleContext().setAccessibleName("Registros del archivo");
         records.add(new JScrollPane(table), BorderLayout.CENTER);
 
         JPanel recordControls = new JPanel(new BorderLayout(4, 8));
-        JPanel search = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        JPanel search = new JPanel(new BorderLayout(8, 0));
         JLabel searchLabel = new JLabel("Buscar:"); searchLabel.setLabelFor(filter);
-        search.add(searchLabel); search.add(filter); search.add(count);
+        search.add(searchLabel, BorderLayout.WEST);
+        search.add(filter, BorderLayout.CENTER);
+        search.add(count, BorderLayout.EAST);
         recordControls.add(search, BorderLayout.NORTH);
         JPanel mutations = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         JLabel identifierLabel = new JLabel("Identificador:"); identifierLabel.setLabelFor(idField);
@@ -122,6 +131,9 @@ final class RepositoryManagerPanel extends JPanel {
         records.add(recordControls, BorderLayout.SOUTH);
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, navigation, records);
         split.setResizeWeight(0.25); split.setDividerLocation(255);
+        split.setBorder(BorderFactory.createEmptyBorder());
+        split.setContinuousLayout(true);
+        split.setOneTouchExpandable(true);
         add(split, BorderLayout.CENTER);
         status.setEditable(false); status.setLineWrap(true); status.setWrapStyleWord(true);
         status.setOpaque(false); status.setFont(new JLabel().getFont());
@@ -349,6 +361,16 @@ final class RepositoryManagerPanel extends JPanel {
                             snapshot.getProperty(prefix + "type"), true,
                             Boolean.parseBoolean(snapshot.getProperty(prefix + "nullable", "false")),
                             snapshot.getProperty(prefix + "enum", ""), "", false));
+                    if (Boolean.parseBoolean(snapshot.getProperty(prefix + "reference", "false"))) {
+                        FormInput input = inputs.get(inputs.size() - 1);
+                        ((JTextField) input.editor).setEditable(false);
+                        JButton choose = new JButton("Seleccionar objeto…");
+                        String referenceType = snapshot.getProperty(prefix + "type");
+                        choose.addActionListener(e -> chooseReference(input, referenceType));
+                        GridBagConstraints position = new GridBagConstraints();
+                        position.gridx = 3; position.gridy = p; position.insets = new Insets(5, 5, 5, 5);
+                        form.add(choose, position);
+                    }
                 }
             } else {
                 for (FieldInfo field : fields) {
@@ -375,12 +397,47 @@ final class RepositoryManagerPanel extends JPanel {
         boolean arguments = constructor != null && constructor.parameters > 0;
         for (FormInput input : inputs) {
             if (!input.editable) continue;
+            if (arguments && input.editor.getClientProperty("referenceFile") != null) {
+                request.setProperty("argFile." + input.index, (String) input.editor.getClientProperty("referenceFile"));
+                request.setProperty("argRevision." + input.index, (String) input.editor.getClientProperty("referenceRevision"));
+                request.setProperty("argRow." + input.index, (String) input.editor.getClientProperty("referenceRow"));
+            }
             request.setProperty((arguments ? "argNull." : "null.") + input.index, Boolean.toString(input.nullValue.isSelected()));
             request.setProperty((arguments ? "arg." : "value.") + input.index, input.editor instanceof JTextField text
                     ? text.getText() : String.valueOf(((JComboBox<?>) input.editor).getSelectedItem()));
         }
         run(request, "Guardando registro…", response -> {
             applySnapshot(response); status.setText(adding ? "Registro agregado y guardado." : "Registro actualizado y guardado.");
+        });
+    }
+
+    private void chooseReference(FormInput input, String type) {
+        JFileChooser chooser = new JFileChooser(new File(projectDirectory, "data"));
+        chooser.setDialogTitle("Seleccionar archivo de " + type);
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        String path = chooser.getSelectedFile().getAbsolutePath();
+        Properties query = new Properties();
+        query.setProperty("op", "open"); query.setProperty("type", type); query.setProperty("file", path);
+        run(query, "Leyendo objetos relacionados…", result -> {
+            int size = number(result, "row.count");
+            if (size == 0) { JOptionPane.showMessageDialog(this, "El archivo no contiene registros."); return; }
+            String[] options = new String[size];
+            for (int r = 0; r < size; r++) {
+                StringBuilder label = new StringBuilder("#" + (r + 1));
+                for (int f = 0; f < number(result, "field.count"); f++)
+                    label.append(" | ").append(result.getProperty("field." + f + ".name")).append(": ")
+                            .append(result.getProperty("cell." + r + "." + f, "null"));
+                options[r] = label.toString();
+            }
+            Object selection = JOptionPane.showInputDialog(this, "Selecciona el objeto", "Objeto relacionado",
+                    JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+            if (selection == null) return;
+            int row = java.util.Arrays.asList(options).indexOf(selection);
+            input.editor.putClientProperty("referenceFile", path);
+            input.editor.putClientProperty("referenceRevision", result.getProperty("revision"));
+            input.editor.putClientProperty("referenceRow", Integer.toString(row));
+            ((JTextField) input.editor).setText(selection.toString());
+            input.nullValue.setSelected(false); input.editor.setEnabled(true);
         });
     }
 
